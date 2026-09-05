@@ -65,7 +65,13 @@ TAKE 3 — CTA: continuar diretamente o Take 2 e concluir a mesma copy. Fazer um
 
 IDIOMA OBRIGATÓRIO: absolutamente TODO o conteúdo textual deve estar em português do Brasil (pt-BR), incluindo conceito, hook, hooks alternativos, títulos, objetivos, cenas, ações, enquadramentos, falas, textos na tela e prompts de vídeo. Use português brasileiro natural, coloquial quando adequado ao TikTok, e nunca responda em inglês.
 
-CONTINUIDADE: mantenha o mesmo produto, contexto, pessoa/avatar, ambiente, aparência, roupa, iluminação e estilo visual entre os três takes. As ações e a câmera podem evoluir, mas deve ficar evidente que é a continuação da mesma gravação. A soma das durações dos três takes deve ser ${duration}s. As falas devem caber naturalmente no tempo de cada take.
+CONSISTÊNCIA DE CENÁRIO — REGRA RÍGIDA: os três takes devem acontecer no MESMO cenário físico. Não mude de cômodo, local, loja, rua, fundo ou ambiente entre os takes. Preserve exatamente os mesmos elementos principais do cenário, decoração, móveis, objetos visíveis, posição relativa dos elementos, horário aparente, direção e qualidade da luz, paleta visual e atmosfera. Se o ambiente selecionado for ${environment}, ele deve ser mantido do início ao fim. Caso seja Automático, escolha um único cenário coerente com o produto e mantenha-o idêntico nos três takes.
+
+CONTINUIDADE VISUAL — REGRA RÍGIDA: mantenha o mesmo produto, mesma pessoa/avatar, rosto, cabelo, roupa, acessórios, aparência, proporções, iluminação, estilo visual e identidade em todos os takes. O produto deve manter exatamente a mesma cor, formato, tamanho aparente, embalagem e detalhes visuais. Não introduza novos objetos importantes nem remova objetos principais do cenário sem uma ação explícita da pessoa. A posição da pessoa e do produto pode evoluir naturalmente, mas o Take 2 deve parecer começar imediatamente após o Take 1 e o Take 3 imediatamente após o Take 2.
+
+CONTINUIDADE DE CÂMERA: mudanças de enquadramento são permitidas somente como movimentos ou cortes naturais dentro do mesmo ambiente, por exemplo aproximação, leve pan, mudança de plano ou detalhe do produto. Nunca faça uma transição que pareça mudar de locação. Descreva cada prompt_video de forma que reforce explicitamente a continuidade do take anterior.
+
+A soma das durações dos três takes deve ser ${duration}s. As falas devem caber naturalmente no tempo de cada take.
 
 Crie 1 hook principal e exatamente 3 hooks alternativos. Os hooks alternativos são opções apenas para substituir a abertura do Take 1; o corpo e CTA continuam pertencendo ao mesmo anúncio. Não invente fatos, benefícios, preço, desconto, urgência, avaliações, materiais, especificações ou resultados que não estejam sustentados pela análise.
 
