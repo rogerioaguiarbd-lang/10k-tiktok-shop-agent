@@ -46,7 +46,7 @@ async function gemini(prompt,extraParts=[]){
 
 app.post('/api/analyze',auth,upload.single('image'),async(r,s)=>{try{
   if(!r.file)return s.status(400).json({error:'Envie um print.'});
-  const prompt='Você é especialista em TikTok Shop. Analise somente o que está visível no print e use inferências conservadoras. Não invente preço, desconto, estoque, avaliações, certificações, material, especificações ou alegações. Responda SOMENTE JSON válido em português BR com: produto,categoria,marca,descricao_visual,caracteristicas(array),beneficios(array),diferenciais(array),publico,problema,beneficio_principal,demonstracao_visual,angulo,ambiente_recomendado,tipo_hook_recomendado,confianca,observacoes.';
+  const prompt='Você é especialista em TikTok Shop. Analise somente o que está visível no print e use inferências conservadoras. Não invente preço, desconto, estoque, avaliações, certificações, material, especificações ou alegações. Responda SOMENTE JSON válido e escreva TODO o conteúdo exclusivamente em português do Brasil (pt-BR), com linguagem natural brasileira. Campos: produto,categoria,marca,descricao_visual,caracteristicas(array),beneficios(array),diferenciais(array),publico,problema,beneficio_principal,demonstracao_visual,angulo,ambiente_recomendado,tipo_hook_recomendado,confianca,observacoes.';
   const a=await gemini(prompt,[{inline_data:{mime_type:r.file.mimetype,data:r.file.buffer.toString('base64')}}]);
   const st=await read(),id=crypto.randomUUID();st.products.unshift({id,createdAt:new Date().toISOString(),analysis:a});await write(st);s.json({...a,_productId:id});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha na análise.'})}});
@@ -54,7 +54,22 @@ app.post('/api/analyze',auth,upload.single('image'),async(r,s)=>{try{
 app.post('/api/generate',auth,async(r,s)=>{try{
   const {analysis,format,duration=15,generator='Genérico',avatar='Automático',environment='Automático',variation=1,productId=null}=r.body||{};
   if(!analysis||!['UGC','POV'].includes(format))return s.status(400).json({error:'Escolha UGC ou POV.'});
-  const prompt=`Você é diretor criativo de TikTok Shop. Usando somente a análise abaixo, crie anúncio vertical 9:16 de ${duration}s, formato ${format}, gerador ${generator}, avatar ${avatar}, ambiente ${environment}. Exatamente 3 takes: 1 hook fortíssimo; 2 demonstração e benefícios; 3 CTA natural indicando o carrinho laranja sem pressão. Não invente fatos. Crie 1 hook principal e exatamente 3 alternativas. Responda SOMENTE JSON válido: {formato,duracao_total,gerador,avatar,ambiente,conceito,hook_escolhido,hooks_alternativos:[3],takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video} x3]}. Variação ${variation}. ANÁLISE: ${JSON.stringify(analysis)}`;
+  const prompt=`Você é um diretor criativo e copywriter especialista em TikTok Shop Brasil. Usando SOMENTE a análise do produto abaixo, crie UM ÚNICO anúncio vertical 9:16 de ${duration}s, no formato ${format}, gerador ${generator}, avatar ${avatar}, ambiente ${environment}.
+
+REGRA PRINCIPAL: os 3 takes NÃO são três anúncios independentes. Eles são três partes consecutivas da MESMA copy, formando uma única fala contínua, coerente e natural. A última ideia/frase de um take deve preparar ou conectar naturalmente com o próximo, sem reiniciar a apresentação, sem repetir o hook e sem parecer que mudou de vídeo.
+
+ESTRUTURA OBRIGATÓRIA:
+TAKE 1 — HOOK: abrir com um gancho muito forte que interrompa o scroll e imediatamente introduza/apresente o produto ou o problema/desejo que ele resolve. Não concluir a mensagem; deixar a fala pronta para continuar no Take 2.
+TAKE 2 — CORPO: continuar diretamente a ideia e a fala do Take 1. Mostrar/apresentar o produto em uso e explicar os benefícios/diferenciais mais relevantes permitidos pela análise. Não criar um novo hook e não recomeçar a apresentação. Terminar preparando naturalmente o CTA.
+TAKE 3 — CTA: continuar diretamente o Take 2 e concluir a mesma copy. Fazer uma recomendação natural, como alguém que realmente gostou/indicaria o produto, conduzindo ao carrinho laranja sem pressão, sem linguagem agressiva de venda.
+
+IDIOMA OBRIGATÓRIO: absolutamente TODO o conteúdo textual deve estar em português do Brasil (pt-BR), incluindo conceito, hook, hooks alternativos, títulos, objetivos, cenas, ações, enquadramentos, falas, textos na tela e prompts de vídeo. Use português brasileiro natural, coloquial quando adequado ao TikTok, e nunca responda em inglês.
+
+CONTINUIDADE: mantenha o mesmo produto, contexto, pessoa/avatar, ambiente, aparência, roupa, iluminação e estilo visual entre os três takes. As ações e a câmera podem evoluir, mas deve ficar evidente que é a continuação da mesma gravação. A soma das durações dos três takes deve ser ${duration}s. As falas devem caber naturalmente no tempo de cada take.
+
+Crie 1 hook principal e exatamente 3 hooks alternativos. Os hooks alternativos são opções apenas para substituir a abertura do Take 1; o corpo e CTA continuam pertencendo ao mesmo anúncio. Não invente fatos, benefícios, preço, desconto, urgência, avaliações, materiais, especificações ou resultados que não estejam sustentados pela análise.
+
+Responda SOMENTE JSON válido neste formato: {formato,duracao_total,gerador,avatar,ambiente,conceito,hook_escolhido,hooks_alternativos:[3],takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video}]}. Variação ${variation}. ANÁLISE: ${JSON.stringify(analysis)}`;
   const c=await gemini(prompt);const st=await read(),id=crypto.randomUUID();st.creatives.unshift({id,createdAt:new Date().toISOString(),productId,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis});await write(st);s.json({...c,_creativeId:id});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar.'})}});
 
