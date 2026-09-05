@@ -18,10 +18,11 @@ await fs.mkdir(dataDir,{recursive:true});
 try{await fs.access(storeFile)}catch{await fs.writeFile(storeFile,JSON.stringify({products:[],creatives:[]}))}
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:12*1024*1024}});
-app.use(express.json({limit:'5mb'}));
+app.use(express.json({limit:'8mb'}));
 app.use(express.static(path.join(dir,'public')));
 const read=async()=>JSON.parse(await fs.readFile(storeFile,'utf8'));
 const write=async d=>{const tmp=storeFile+'.tmp';await fs.writeFile(tmp,JSON.stringify(d,null,2));await fs.rename(tmp,storeFile)};
+const clamp=n=>Math.max(0,Math.min(100,Math.round(Number(n)||0)));
 const cookies=r=>Object.fromEntries((r.headers.cookie||'').split(';').map(x=>x.trim()).filter(Boolean).map(x=>{const i=x.indexOf('=');return[x.slice(0,i),decodeURIComponent(x.slice(i+1))]}));
 function token(exp){const p=`admin.${exp}`;return `${p}.${crypto.createHmac('sha256',secret).update(p).digest('hex')}`}
 function valid(t=''){const a=t.split('.');if(a.length!==3||a[0]!=='admin'||Date.now()>Number(a[1]))return false;return a[2]===crypto.createHmac('sha256',secret).update(`admin.${a[1]}`).digest('hex')}
@@ -31,9 +32,9 @@ app.post('/api/login',(r,s)=>{if(String(r.body?.password||'')!==password)return 
 app.post('/api/logout',(_,s)=>{s.setHeader('Set-Cookie','session=; Path=/; Max-Age=0');s.json({ok:true})});
 app.get('/api/me',(r,s)=>s.json({authenticated:valid(cookies(r).session)}));
 
-async function gemini(prompt,extraParts=[],maxOutputTokens=4096){
+async function gemini(prompt,extraParts=[],maxOutputTokens=6500){
   if(!process.env.GEMINI_API_KEY)throw Error('GEMINI_API_KEY não configurada no servidor.');
-  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':process.env.GEMINI_API_KEY},body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt},...extraParts]}],generationConfig:{responseMimeType:'application/json',temperature:.45,maxOutputTokens}})});
+  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':process.env.GEMINI_API_KEY},body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt},...extraParts]}],generationConfig:{responseMimeType:'application/json',temperature:.55,maxOutputTokens}})});
   const data=await res.json().catch(()=>({}));if(!res.ok)throw Error(data?.error?.message||`Erro Gemini ${res.status}`);
   const text=(data?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!text)throw Error('A IA não retornou conteúdo.');
   try{return JSON.parse(text.replace(/^```json\s*/i,'').replace(/```$/,'').trim())}catch{throw Error('Resposta inválida da IA. Tente novamente.')}
@@ -41,38 +42,76 @@ async function gemini(prompt,extraParts=[],maxOutputTokens=4096){
 
 app.post('/api/analyze',auth,upload.single('image'),async(r,s)=>{try{
   if(!r.file)return s.status(400).json({error:'Envie um print.'});
-  const imageHash=crypto.createHash('sha256').update(r.file.buffer).digest('hex');
-  const st=await read();
-  const cached=st.products.find(p=>p.sourceImageHash===imageHash&&p.analysis);
+  const imageHash=crypto.createHash('sha256').update(r.file.buffer).digest('hex'),st=await read(),cached=st.products.find(p=>p.sourceImageHash===imageHash&&p.analysis);
   if(cached)return s.json({...cached.analysis,_productId:cached.id,_cached:true});
-  const prompt='Você é especialista em TikTok Shop. Analise somente o PRODUTO e informações comerciais visíveis no print, com inferências conservadoras. Ignore características humanas. Não invente preço, desconto, estoque, avaliações, certificações, material, especificações ou alegações. Responda SOMENTE JSON válido em pt-BR com: produto,categoria,marca,descricao_visual,caracteristicas(array),beneficios(array),diferenciais(array),publico,problema,beneficio_principal,demonstracao_visual,angulo,ambiente_recomendado,tipo_hook_recomendado,confianca,observacoes.';
-  const a=await gemini(prompt,[{inline_data:{mime_type:r.file.mimetype,data:r.file.buffer.toString('base64')}}],2048);
-  const id=crypto.randomUUID();st.products.unshift({id,createdAt:new Date().toISOString(),sourceImageHash:imageHash,analysis:a});await write(st);s.json({...a,_productId:id,_cached:false})
+  const prompt='Analise SOMENTE produto e informações comerciais visíveis no print de TikTok Shop. Use inferências conservadoras. Ignore características humanas. Não invente preço, desconto, estoque, avaliações, certificações, material, especificações ou alegações. Responda JSON pt-BR: produto,categoria,marca,descricao_visual,caracteristicas(array),beneficios(array),diferenciais(array),publico,problema,beneficio_principal,demonstracao_visual,angulo,ambiente_recomendado,tipo_hook_recomendado,confianca,observacoes.';
+  const a=await gemini(prompt,[{inline_data:{mime_type:r.file.mimetype,data:r.file.buffer.toString('base64')}}],2200),id=crypto.randomUUID();
+  st.products.unshift({id,createdAt:new Date().toISOString(),sourceImageHash:imageHash,analysis:a});await write(st);s.json({...a,_productId:id,_cached:false});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha na análise.'})}});
 
-app.post('/api/product-prompt',auth,async(r,s)=>{try{const {analysis}=r.body||{};if(!analysis)return s.status(400).json({error:'Analise um produto primeiro.'});const prompt=`Crie UM prompt de fotografia publicitária para TikTok Shop em pt-BR usando SOMENTE esta análise. Gere APENAS O PRODUTO, sem pessoas/avatar/mãos/cor do produto. Não invente atributos, materiais, textos, logos, preço, desconto ou acessórios. Vertical 9:16, realista, iluminação natural profissional, produto protagonista, cenário coerente. JSON: {prompt_imagem_produto}. ANÁLISE:${JSON.stringify(analysis)}`;s.json(await gemini(prompt,[],1536))}catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar prompt do produto.'})}});
+app.post('/api/product-prompt',auth,async(r,s)=>{try{const {analysis}=r.body||{};if(!analysis)return s.status(400).json({error:'Analise um produto primeiro.'});const p=`Crie UM prompt de fotografia publicitária TikTok Shop em pt-BR usando SOMENTE a análise. APENAS produto, sem pessoas/avatar/mãos e SEM mencionar cor do produto. Não invente atributos, material, texto, logo, preço, desconto ou acessórios. Vertical 9:16, realista, produto protagonista, cenário coerente. JSON:{prompt_imagem_produto}. ANÁLISE:${JSON.stringify(analysis)}`;s.json(await gemini(p,[],1500))}catch(e){s.status(500).json({error:e.message})}});
+
+function normalizeCreative(c){
+ c.aberturas_abc=(c.hooks_alternativos||[]).slice(0,3).map((hook,i)=>({letra:['A','B','C'][i],hook}));
+ if(Array.isArray(c.takes))c.takes=c.takes.map(t=>({...t,fala:String(t.fala||'').replace(/^\s*\.{2,}\s*/,'').replace(/\s*\.{2,}\s*$/,'').trim()}));
+ if(c.diagnostico){for(const k of ['hook','clareza','demonstracao','retencao','cta'])c.diagnostico[k]=clamp(c.diagnostico[k]);c.diagnostico.potencial_venda=Math.round(['hook','clareza','demonstracao','retencao','cta'].reduce((n,k)=>n+c.diagnostico[k],0)/5);c.diagnostico.aviso='Diagnóstico criativo; não é previsão nem garantia de vendas.'}
+ if(c.saturacao_copy){c.saturacao_copy.nota=clamp(c.saturacao_copy.nota)}
+ return c;
+}
+
+function buildPrompt(opts){
+ const {analysis,duration,generator,avatar,environment,copyStyle,intensity,optimizeSales,creativeDirector,ugcRealism,continuityLock,productFirst,angleMode,variantLabel}=opts;
+ const auto=creativeDirector?'CREATIVE DIRECTOR AUTOMÁTICO: escolha internamente formato UGC ou POV, estilo de copy, intensidade, avatar funcional, ambiente, estrutura, hook, demonstração e CTA mais coerentes para este produto. Preencha decisoes_diretor com as escolhas e motivos curtos.':'Respeite exatamente as configurações fornecidas.';
+ const structure='Escolha UMA estrutura principal entre: problema→solução, demonstração→prova, curiosidade→revelação, descoberta pessoal, comparação, erro comum, benefício direto, antes/depois somente se sustentado, objeção→resposta. Informe estrutura_escolhida.';
+ const realism=ugcRealism?'UGC REALISTA AVANÇADO: linguagem coloquial crível, micro-pausas naturais, pequenos gestos, leve movimento de smartphone, olhar alternando produto/lente, sem estética de comercial de TV e sem exagerar imperfeições.':'';
+ const continuity=continuityLock?'CONTINUITY LOCK: fixe mesmo cenário, iluminação, produto, avatar/roupa quando houver, posição espacial e continuidade temporal. Cada take deve trazer continuity_key idêntica e instrução de início/fim compatível com o take anterior.':'';
+ const productFirstRule=productFirst?'PRODUTO PRIMEIRO: produto deve aparecer claramente nos primeiros 1,5s sem sacrificar naturalidade.':'';
+ return `Você é o Creative Director do 10K Prompt, especialista em anúncios TikTok Shop Brasil orientados a retenção, clareza, demonstração e conversão ética. Use SOMENTE fatos sustentados pela análise.
+${auto}\n${structure}\n${realism}\n${continuity}\n${productFirstRule}
+CONFIGURAÇÕES quando não automáticas: duração=${duration}s; gerador=${generator}; avatar=${avatar}; ambiente=${environment}; estilo=${copyStyle}; intensidade=${intensity}; otimizar_vendas=${!!optimizeSales}; ângulo solicitado=${angleMode||'Automático'}; variante=${variantLabel||'principal'}.
+
+GERADOR DE ÂNGULOS: crie exatamente 5 angulos_venda diferentes e específicos para o produto (ex.: praticidade, dor, desejo, demonstração, descoberta/economia somente se sustentada). Cada item: nome,ideia,promessa_permitida,melhor_visual. Escolha um em angulo_escolhido.
+HOOK LAB: gere 7 hooks, um por tipo quando aplicável: curiosidade, benefício direto, identificação, demonstração, contrarian/erro comum, problema oculto, descoberta pessoal. Cada item: tipo,hook,forca_0_100. Selecione hook_escolhido e 3 hooks_alternativos realmente diferentes e compatíveis com o mesmo corpo.
+CTA INTELIGENTE: adapte o CTA à categoria e intenção. Não use escassez, desconto, preço ou urgência se não estiverem explicitamente sustentados. CTA deve soar como recomendação natural ao carrinho laranja.
+ROTEIRO VISUAL POR SEGUNDOS: crie timeline_visual cobrindo todo o vídeo em blocos curtos com inicio_seg,fim_seg,objetivo_visual,acao,camera,produto_em_foco. O vídeo deve ser compreensível mesmo sem áudio.
+DETECTOR DE FALHAS: após criar, liste falhas_criativo com no máximo 5 itens: area,severidade(baixa/media/alta),problema,correcao. Avalie hook tardio, produto demorando, fala longa, pouca demonstração, repetição, CTA genérico, linguagem artificial e quebra de continuidade.
+SATURAÇÃO DA COPY: saturacao_copy={nota 0-100 onde 100=copy muito genérica/saturada,frases_genericas:[...],ajuste}. Penalize clichês como “você precisa disso”, “corre aproveitar”, “produto perfeito”, “melhor compra” quando não houver contexto específico.
+DIAGNÓSTICO: notas 0-100 hook,clareza,demonstracao,retencao,cta e sugestao_melhoria. potencial_venda será calculado pelo sistema; é diagnóstico criativo, não previsão.
+
+3 TAKES = UMA ÚNICA COPY contínua: T1 hook/introdução; T2 demonstração+benefício; T3 conclusão+CTA. Falas devem caber em ${duration}s no total. Mesmo contexto visual. Não repetir apresentação.
+ÁUDIO: SOMENTE campo fala é pronunciado. Cena/ação/objetivo/enquadramento/texto_tela/prompt são silenciosos. Cada prompt_video DEVE conter exatamente a regra: “ÁUDIO: pronunciar exclusivamente esta fala: [fala exata]. Não narrar nem pronunciar nenhuma outra instrução deste prompt.”
+PROIBIDO: mencionar cor do produto; inventar preço/desconto/estoque/urgência/escassez/material/especificação/resultado; descrever identidade/aparência facial do avatar.
+
+Responda SOMENTE JSON válido com:
+{formato,duracao_total,gerador,avatar,ambiente,estilo_copy,intensidade,estrutura_escolhida,decisoes_diretor:{formato,estilo,intensidade,ambiente,avatar,motivo},conceito,angulo_escolhido,angulos_venda:[{nome,ideia,promessa_permitida,melhor_visual}],hook_escolhido,hook_lab:[{tipo,hook,forca_0_100}],hooks_alternativos:[3],timeline_visual:[{inicio_seg,fim_seg,objetivo_visual,acao,camera,produto_em_foco}],takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,continuity_key,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,continuity_key,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,continuity_key,prompt_video}],falhas_criativo:[{area,severidade,problema,correcao}],saturacao_copy:{nota,frases_genericas,ajuste},diagnostico:{hook,clareza,demonstracao,retencao,cta,sugestao_melhoria}}.
+ANÁLISE:${JSON.stringify(analysis)}`;
+}
 
 app.post('/api/generate',auth,async(r,s)=>{try{
- const {analysis,format,duration=15,generator='Genérico',avatar='Automático',environment='Automático',copyStyle='Natural',optimizeSales=true,intensity='Equilibrado',variation=1,productId=null}=r.body||{};
- if(!analysis||!['UGC','POV'].includes(format))return s.status(400).json({error:'Escolha UGC ou POV.'});
- const estilos=['Natural','Autoridade','Amigável','Urgente / Oferta','Curiosidade / Desconto','Mix inteligente'];const estilo=estilos.includes(copyStyle)?copyStyle:'Natural';
- const intensidades=['Suave','Equilibrado','Agressivo'];const intensidade=intensidades.includes(intensity)?intensity:'Equilibrado';
- const styleRule=estilo==='Mix inteligente'?`MIX INTELIGENTE: combine estilos coerentemente. Take 1 prioriza retenção/hook; Take 2 clareza+demonstração+benefício; Take 3 recomendação natural+CTA. Adapte ao produto.`:`ESTILO ${estilo}: Natural=espontâneo; Autoridade=seguro/objetivo; Amigável=próximo; Urgente / Oferta=direto sem inventar oferta; Curiosidade / Desconto=curiosidade e só citar desconto/preço se sustentado. Aplique ao hook, A/B/C e 3 falas.`;
- const optimizeRule=optimizeSales?'OTIMIZE PARA VENDAS: hook forte, benefício fiel, demonstração clara, ritmo TikTok e CTA natural.':'Sem ênfase extra em conversão.';
- const prompt=`Diretor criativo/copywriter TikTok Shop Brasil. Crie UM anúncio vertical 9:16 de ${duration}s, ${format}, gerador ${generator}, avatar ${avatar}, ambiente ${environment}, usando SOMENTE a análise.
-${styleRule}\n${optimizeRule}\nINTENSIDADE ${intensidade}: Suave=leve; Equilibrado=persuasivo sem exageros; Agressivo=mais direto/energético. Nunca invente preço, desconto, urgência, escassez, benefício, resultado ou promessa.
-CONTINUIDADE: 3 takes são UMA copy contínua: T1 hook; T2 corpo/demonstração/benefícios; T3 CTA natural ao carrinho laranja. Mesmo cenário, avatar, produto e iluminação; cortes apenas naturais.
-A/B/C: exatamente 3 aberturas diferentes para substituir apenas o início do T1, todas compatíveis com o MESMO T2/T3.
-REGRAS: tudo em pt-BR; não descreva aparência/identidade do avatar; não mencione cor do produto. SOMENTE campo fala pode ser pronunciado. Cena/ação/enquadramento/objetivo/texto_tela/prompt são direção silenciosa. Cada prompt_video deve conter: “ÁUDIO: pronunciar exclusivamente esta fala: [fala exata]. Não narrar nem pronunciar nenhuma outra instrução deste prompt.” fala = só palavras exatas, sem rótulos/instruções/marcadores/reticências nas pontas. Durações somam ${duration}s.
-DIAGNÓSTICO CRIATIVO: notas inteiras 0-100 para hook,clareza,demonstracao,retencao,cta; potencial_venda=média. 90+ só excepcional. Uma sugestao_melhoria curta/acionável. É diagnóstico criativo, não previsão/garantia.
-JSON SOMENTE:{formato,duracao_total,gerador,avatar,ambiente,conceito,hook_escolhido,hooks_alternativos:[3],takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video}],diagnostico:{potencial_venda,hook,clareza,demonstracao,retencao,cta,sugestao_melhoria}}. Variação ${variation}. ANÁLISE:${JSON.stringify(analysis)}`;
- const c=await gemini(prompt,[],4600);c.estilo_copy=estilo;c.otimizar_vendas=!!optimizeSales;c.intensidade=intensidade;c.aberturas_abc=(c.hooks_alternativos||[]).slice(0,3).map((hook,i)=>({letra:['A','B','C'][i],hook}));
- if(Array.isArray(c.takes))c.takes=c.takes.map(t=>({...t,fala:String(t.fala||'').replace(/^\s*\.{2,}\s*/,'').replace(/\s*\.{2,}\s*$/,'').trim()}));
- if(c.diagnostico){const keys=['hook','clareza','demonstracao','retencao','cta'];for(const k of keys)c.diagnostico[k]=Math.max(0,Math.min(100,Math.round(Number(c.diagnostico[k])||0)));c.diagnostico.potencial_venda=Math.round(keys.reduce((n,k)=>n+c.diagnostico[k],0)/keys.length);c.diagnostico.aviso='Diagnóstico criativo, não é previsão nem garantia de vendas.'}
- const st=await read(),id=crypto.randomUUID();st.creatives.unshift({id,createdAt:new Date().toISOString(),productId,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis});await write(st);s.json({...c,_creativeId:id})
+ const b=r.body||{},analysis=b.analysis;if(!analysis)return s.status(400).json({error:'Analise um produto primeiro.'});
+ const count=[1,3,5].includes(Number(b.batchCount))?Number(b.batchCount):1;
+ const base={analysis,duration:Number(b.duration)||15,generator:b.generator||'Genérico',avatar:b.avatar||'Automático',environment:b.environment||'Automático',copyStyle:b.copyStyle||'Natural',intensity:b.intensity||'Equilibrado',optimizeSales:b.optimizeSales!==false,creativeDirector:!!b.creativeDirector,ugcRealism:b.ugcRealism!==false,continuityLock:b.continuityLock!==false,productFirst:b.productFirst!==false,angleMode:b.angleMode||'Automático'};
+ if(!base.creativeDirector&&!['UGC','POV'].includes(b.format))return s.status(400).json({error:'Escolha UGC ou POV, ou ative Creative Director.'});
+ const results=[];
+ for(let i=0;i<count;i++){
+   const p=buildPrompt({...base,format:b.format,variantLabel:`${(Number(b.variation)||1)+i}`});
+   let c=normalizeCreative(await gemini(p,[],7600));
+   c.formato=c.formato||b.format||c.decisoes_diretor?.formato||'UGC';c.estilo_copy=c.estilo_copy||base.copyStyle;c.intensidade=c.intensidade||base.intensity;
+   c.recursos={creativeDirector:base.creativeDirector,ugcRealism:base.ugcRealism,continuityLock:base.continuityLock,productFirst:base.productFirst};
+   results.push(c);
+ }
+ const st=await read(),ids=[];for(const c of results){const id=crypto.randomUUID();ids.push(id);st.creatives.unshift({id,createdAt:new Date().toISOString(),productId:b.productId||null,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis})}await write(st);
+ s.json(count===1?{...results[0],_creativeId:ids[0]}:{batch:true,creatives:results.map((x,i)=>({...x,_creativeId:ids[i]}))});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar.'})}});
 
-app.get('/api/products',auth,async(_,s)=>s.json((await read()).products.slice(0,100)));
-app.get('/api/history',auth,async(_,s)=>s.json((await read()).creatives.slice(0,100)));
+app.post('/api/improve',auth,async(r,s)=>{try{
+ const {analysis,creative}=r.body||{};if(!analysis||!creative)return s.status(400).json({error:'Criativo e análise são obrigatórios.'});
+ const prompt=`Você é editor de performance. Corrija automaticamente SOMENTE os pontos fracos deste criativo, preservando produto, fatos, conceito que já funciona, duração e continuidade. Priorize falhas_criativo de severidade alta/média, sugestao_melhoria do diagnóstico e saturacao_copy. Fortaleça hook, demonstração, clareza, retenção e CTA sem inventar fatos, preço, desconto, urgência, escassez ou cor do produto. SOMENTE campo fala pode ser pronunciado; preserve a regra explícita de áudio em cada prompt_video. Gere timeline_visual, hook_lab, angulos_venda, falhas_criativo, saturacao_copy e diagnostico novamente. Responda no MESMO formato JSON do criativo recebido, sem comentários. ANÁLISE:${JSON.stringify(analysis)} CRIATIVO:${JSON.stringify(creative)}`;
+ let c=normalizeCreative(await gemini(prompt,[],7600));
+ const st=await read(),id=crypto.randomUUID();st.creatives.unshift({id,createdAt:new Date().toISOString(),productId:null,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis,improvedFrom:true});await write(st);s.json({...c,_creativeId:id,_improved:true});
+}catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao corrigir criativo.'})}});
+
+app.get('/api/products',auth,async(_,s)=>s.json((await read()).products.slice(0,200)));
+app.get('/api/history',auth,async(_,s)=>s.json((await read()).creatives.slice(0,200)));
 app.get('/api/health',(_,s)=>s.json({ok:true,provider:'google-gemini',model,apiConfigured:!!process.env.GEMINI_API_KEY,dataDirConfigured:!!process.env.DATA_DIR}));
 app.listen(port,()=>console.log(`10K Prompt na porta ${port} com Gemini ${model}`));
