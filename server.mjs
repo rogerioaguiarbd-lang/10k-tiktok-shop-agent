@@ -46,7 +46,7 @@ async function gemini(prompt,extraParts=[]){
 
 app.post('/api/analyze',auth,upload.single('image'),async(r,s)=>{try{
   if(!r.file)return s.status(400).json({error:'Envie um print.'});
-  const prompt='Você é especialista em TikTok Shop. Analise somente o PRODUTO e as informações comerciais visíveis no print, usando inferências conservadoras. Ignore características físicas de qualquer pessoa que apareça na imagem: não descreva rosto, cabelo, pele, olhos, idade aparente, corpo, etnia ou identidade visual humana. Não invente preço, desconto, estoque, avaliações, certificações, material, especificações ou alegações. Responda SOMENTE JSON válido e escreva TODO o conteúdo exclusivamente em português do Brasil (pt-BR), com linguagem natural brasileira. Campos: produto,categoria,marca,descricao_visual,caracteristicas(array),beneficios(array),diferenciais(array),publico,problema,beneficio_principal,demonstracao_visual,angulo,ambiente_recomendado,tipo_hook_recomendado,confianca,observacoes.';
+  const prompt='Você é especialista em TikTok Shop. Analise somente o PRODUTO e as informações comerciais visíveis no print, usando inferências conservadoras. Ignore características físicas de qualquer pessoa que apareça na imagem. Não invente preço, desconto, estoque, avaliações, certificações, material, especificações ou alegações. Responda SOMENTE JSON válido e escreva TODO o conteúdo exclusivamente em português do Brasil. Campos: produto,categoria,marca,descricao_visual,caracteristicas(array),beneficios(array),diferenciais(array),publico,problema,beneficio_principal,demonstracao_visual,angulo,ambiente_recomendado,tipo_hook_recomendado,confianca,observacoes.';
   const a=await gemini(prompt,[{inline_data:{mime_type:r.file.mimetype,data:r.file.buffer.toString('base64')}}]);
   const st=await read(),id=crypto.randomUUID();st.products.unshift({id,createdAt:new Date().toISOString(),analysis:a});await write(st);s.json({...a,_productId:id});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha na análise.'})}});
@@ -54,41 +54,68 @@ app.post('/api/analyze',auth,upload.single('image'),async(r,s)=>{try{
 app.post('/api/product-prompt',auth,async(r,s)=>{try{
   const {analysis}=r.body||{};
   if(!analysis)return s.status(400).json({error:'Analise um produto primeiro.'});
-  const prompt=`Você é especialista em fotografia publicitária de produtos para TikTok Shop. Com base SOMENTE na análise abaixo, crie UM prompt de imagem em português do Brasil para gerar APENAS O PRODUTO, sem pessoas, sem avatar, sem mãos e sem partes do corpo. Preserve fielmente somente os atributos sustentados pela análise, como formato, embalagem, acabamento, marca e detalhes visíveis, MAS NÃO DESCREVA NEM MENCIONE NENHUMA COR DO PRODUTO. Não use nomes de cores, tonalidades ou referências cromáticas. Não invente características, materiais, textos, logos, preço, desconto ou acessórios inexistentes. Composição vertical 9:16, produto como protagonista absoluto, aparência realista, iluminação profissional natural, fotografia de e-commerce premium e fundo/cenário coerente com a categoria. Não adicione texto gráfico à imagem, exceto textos que já façam parte da embalagem original. Responda SOMENTE JSON válido no formato {prompt_imagem_produto}. ANÁLISE: ${JSON.stringify(analysis)}`;
-  const out=await gemini(prompt);
-  s.json(out);
+  const prompt=`Você é especialista em fotografia publicitária de produtos para TikTok Shop. Com base SOMENTE na análise abaixo, crie UM prompt de imagem em português do Brasil para gerar APENAS O PRODUTO, sem pessoas, avatar, mãos ou partes do corpo. Preserve somente atributos sustentados pela análise, MAS NÃO DESCREVA NEM MENCIONE NENHUMA COR DO PRODUTO. Não invente características, materiais, textos, logos, preço, desconto ou acessórios inexistentes. Composição vertical 9:16, produto protagonista, realista, iluminação profissional natural, fotografia de e-commerce premium e cenário coerente. Não adicione texto gráfico, exceto textos já presentes na embalagem original. Responda SOMENTE JSON válido no formato {prompt_imagem_produto}. ANÁLISE: ${JSON.stringify(analysis)}`;
+  s.json(await gemini(prompt));
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar prompt do produto.'})}});
 
 app.post('/api/generate',auth,async(r,s)=>{try{
-  const {analysis,format,duration=15,generator='Genérico',avatar='Automático',environment='Automático',variation=1,productId=null}=r.body||{};
+  const {analysis,format,duration=15,generator='Genérico',avatar='Automático',environment='Automático',copyStyle='Natural',optimizeSales=true,intensity='Equilibrado',variation=1,productId=null}=r.body||{};
   if(!analysis||!['UGC','POV'].includes(format))return s.status(400).json({error:'Escolha UGC ou POV.'});
+  const estilos=['Natural','Autoridade','Amigável','Urgente / Oferta','Curiosidade / Desconto','Mix inteligente'];
+  const estilo=estilos.includes(copyStyle)?copyStyle:'Natural';
+  const intensidades=['Suave','Equilibrado','Agressivo'];
+  const intensidade=intensidades.includes(intensity)?intensity:'Equilibrado';
+  const styleRule=estilo==='Mix inteligente'
+    ? `MIX INTELIGENTE: combine estilos de forma coerente entre os takes, mantendo UMA ÚNICA narrativa contínua. Take 1 deve usar o tipo de hook que melhor maximize retenção para este produto, podendo privilegiar curiosidade. Take 2 deve privilegiar clareza, demonstração e autoridade/benefício. Take 3 deve soar como recomendação natural e conduzir ao CTA. Isto é orientação, não sequência rígida: adapte ao produto e ao contexto.`
+    : `ESTILO DA COPY: ${estilo}. Natural=espontâneo e crível; Autoridade=seguro e objetivo; Amigável=próximo e leve; Urgente / Oferta=direto para ação sem inventar preço, desconto, estoque, prazo ou promoção; Curiosidade / Desconto=abrir com curiosidade e só citar desconto, preço ou promoção se estiver sustentado pela análise. Adapte o hook principal, as aberturas A/B/C e TODAS as falas dos 3 takes ao estilo.`;
+  const optimizeRule=optimizeSales
+    ? 'OTIMIZAÇÃO PARA VENDAS: priorize hook forte, benefício principal fiel à análise, demonstração visual clara, ritmo adequado ao TikTok e CTA natural e coerente.'
+    : 'OTIMIZAÇÃO PARA VENDAS DESLIGADA: mantenha copy neutra, sem ênfase extra em conversão.';
+
   const prompt=`Você é um diretor criativo e copywriter especialista em TikTok Shop Brasil. Usando SOMENTE a análise do produto abaixo, crie UM ÚNICO anúncio vertical 9:16 de ${duration}s, no formato ${format}, gerador ${generator}, avatar ${avatar}, ambiente ${environment}.
 
-REGRA PRINCIPAL: os 3 takes NÃO são três anúncios independentes. Eles são três partes consecutivas da MESMA copy, formando uma única fala contínua, coerente e natural. A última ideia/frase de um take deve preparar ou conectar naturalmente com o próximo, sem reiniciar a apresentação, sem repetir o hook e sem parecer que mudou de vídeo.
+${styleRule}
+${optimizeRule}
+INTENSIDADE: ${intensidade}. Suave=leve e sem pressão; Equilibrado=persuasivo sem exageros; Agressivo=mais direto e energético. Em qualquer intensidade, NUNCA invente preço, desconto, urgência, escassez, benefício, resultado ou promessa não sustentados pela análise.
 
-ESTRUTURA OBRIGATÓRIA:
-TAKE 1 — HOOK: abrir com um gancho muito forte que interrompa o scroll e imediatamente introduza/apresente o produto ou o problema/desejo que ele resolve. Não concluir a mensagem; deixar a fala pronta para continuar no Take 2.
-TAKE 2 — CORPO: continuar diretamente a ideia e a fala do Take 1. Mostrar/apresentar o produto em uso e explicar os benefícios/diferenciais mais relevantes permitidos pela análise. Não criar um novo hook e não recomeçar a apresentação. Terminar preparando naturalmente o CTA.
-TAKE 3 — CTA: continuar diretamente o Take 2 e concluir a mesma copy. Fazer uma recomendação natural, como alguém que realmente gostou/indicaria o produto, conduzindo ao carrinho laranja sem pressão, sem linguagem agressiva de venda.
+REGRA PRINCIPAL: os 3 takes NÃO são três anúncios independentes. São partes consecutivas da MESMA copy, formando uma fala contínua. O fim de um take deve conectar naturalmente ao próximo, sem reiniciar a apresentação nem repetir o hook.
 
-IDIOMA OBRIGATÓRIO: absolutamente TODO o conteúdo textual deve estar em português do Brasil (pt-BR), incluindo conceito, hook, hooks alternativos, títulos, objetivos, cenas, ações, enquadramentos, falas, textos na tela e prompts de vídeo. Use português brasileiro natural, coloquial quando adequado ao TikTok, e nunca responda em inglês.
+ESTRUTURA:
+TAKE 1 — HOOK: abrir forte, interromper o scroll e introduzir produto ou problema/desejo. Não concluir a mensagem.
+TAKE 2 — CORPO: continuar diretamente o Take 1, demonstrar o produto e explicar benefícios/diferenciais permitidos pela análise. Terminar preparando o CTA.
+TAKE 3 — CTA: continuar o Take 2 e concluir a mesma copy com recomendação natural e condução ao carrinho laranja.
 
-REGRA DO AVATAR — OBRIGATÓRIA: o usuário utilizará o próprio avatar na ferramenta de geração de vídeo. Portanto, NÃO descreva, invente ou especifique nenhuma característica física, facial ou de identidade da pessoa/avatar em nenhum campo e especialmente em prompt_video. Não mencionar formato do rosto, olhos, nariz, boca, lábios, sobrancelhas, cabelo, cor de cabelo, pele, tom de pele, idade, etnia, altura, peso, tipo corporal, barba, maquiagem ou qualquer detalhe de aparência pessoal. Não tente criar uma identidade visual para o avatar. Refira-se somente como “o avatar”, “a pessoa” ou “o apresentador”, conforme necessário. O prompt deve se concentrar em atuação, gestos, posição, interação com o produto, câmera, cenário e iluminação. Preserve a identidade do avatar fornecido pelo usuário sem descrevê-la nem alterá-la.
+ABERTURAS A/B/C — OBRIGATÓRIO: gere exatamente 3 alternativas de abertura para substituir apenas a fala/hook inicial do Take 1. Rotule mentalmente como A, B e C. Todas devem ser compatíveis com o MESMO Take 2 e Take 3, sem exigir mudanças no corpo ou CTA. Elas devem variar o ângulo criativo, não apenas trocar sinônimos.
 
-REGRA DE COR DO PRODUTO — OBRIGATÓRIA: NÃO descreva, mencione, invente ou repita a cor do produto em nenhum campo gerado. Não use nomes de cores, tonalidades ou referências cromáticas para o produto em cena, ação, fala, texto_tela, conceito ou prompt_video. Se a análise contiver uma cor, ignore-a ao redigir o anúncio. Refira-se apenas ao nome/tipo do produto e aos seus atributos não cromáticos.
+IDIOMA: absolutamente todo conteúdo em português do Brasil, natural para TikTok.
 
-CONSISTÊNCIA DE CENÁRIO — REGRA RÍGIDA: os três takes devem acontecer no MESMO cenário físico. Não mude de cômodo, local, loja, rua, fundo ou ambiente entre os takes. Preserve exatamente os mesmos elementos principais do cenário, decoração, móveis, objetos visíveis, posição relativa dos elementos, horário aparente, direção e qualidade da luz, paleta visual e atmosfera. Se o ambiente selecionado for ${environment}, ele deve ser mantido do início ao fim. Caso seja Automático, escolha um único cenário coerente com o produto e mantenha-o idêntico nos três takes.
+REGRA DO AVATAR: NÃO descreva características físicas, faciais ou identidade do avatar. Refira-se apenas como “o avatar”, “a pessoa” ou “o apresentador”. Foque atuação, gestos, interação com produto, câmera, cenário e iluminação.
 
-CONTINUIDADE VISUAL — REGRA RÍGIDA: mantenha o mesmo avatar fornecido pelo usuário, sem descrever sua aparência, e mantenha o mesmo produto, roupa já estabelecida pelo avatar/referência, acessórios já existentes, iluminação, estilo visual e identidade em todos os takes. O produto deve manter exatamente o mesmo formato, tamanho aparente, embalagem e detalhes visuais, sem citar sua cor. Não introduza novos objetos importantes nem remova objetos principais do cenário sem uma ação explícita da pessoa. A posição da pessoa e do produto pode evoluir naturalmente, mas o Take 2 deve parecer começar imediatamente após o Take 1 e o Take 3 imediatamente após o Take 2.
+REGRA DE COR DO PRODUTO: NÃO descreva, mencione ou repita cor do produto em nenhum campo. Ignore qualquer cor presente na análise.
 
-CONTINUIDADE DE CÂMERA: mudanças de enquadramento são permitidas somente como movimentos ou cortes naturais dentro do mesmo ambiente, por exemplo aproximação, leve pan, mudança de plano ou detalhe do produto. Nunca faça uma transição que pareça mudar de locação. Descreva cada prompt_video de forma que reforce explicitamente a continuidade do take anterior.
+CONSISTÊNCIA DE CENÁRIO: os três takes devem acontecer no MESMO cenário físico, mantendo elementos, iluminação e atmosfera. Se o ambiente for ${environment}, mantenha-o do início ao fim; se Automático, escolha um único cenário coerente.
 
-A soma das durações dos três takes deve ser ${duration}s. As falas devem caber naturalmente no tempo de cada take.
+CONTINUIDADE VISUAL: mesmo avatar, produto, roupa/referência, iluminação e identidade nos três takes. O Take 2 começa imediatamente após o Take 1 e o Take 3 imediatamente após o Take 2.
 
-Crie 1 hook principal e exatamente 3 hooks alternativos. Os hooks alternativos são opções apenas para substituir a abertura do Take 1; o corpo e CTA continuam pertencendo ao mesmo anúncio. Não invente fatos, benefícios, preço, desconto, urgência, avaliações, materiais, especificações ou resultados que não estejam sustentados pela análise.
+CONTINUIDADE DE CÂMERA: mudanças de enquadramento apenas como movimentos ou cortes naturais no mesmo ambiente.
+
+REGRA DE ÁUDIO/FALA — PRIORITÁRIA: em cada take, SOMENTE o conteúdo do campo fala pode ser pronunciado. cena, ação, enquadramento, objetivo, texto_tela e instruções do prompt_video são DIREÇÃO VISUAL SILENCIOSA e nunca devem ser narrados. O campo prompt_video deve incluir explicitamente: “ÁUDIO: pronunciar exclusivamente esta fala: [fala exata]. Não narrar nem pronunciar nenhuma outra instrução deste prompt.” O campo fala deve conter apenas as palavras exatas a serem ditas, sem rótulos, instruções, parênteses de direção, marcadores ou reticências no início/fim.
+
+A soma das durações deve ser ${duration}s e as falas devem caber naturalmente no tempo.
+
+Não invente fatos, benefícios, preço, desconto, urgência, avaliações, materiais, especificações ou resultados não sustentados pela análise.
 
 Responda SOMENTE JSON válido neste formato: {formato,duracao_total,gerador,avatar,ambiente,conceito,hook_escolhido,hooks_alternativos:[3],takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video}]}. Variação ${variation}. ANÁLISE: ${JSON.stringify(analysis)}`;
-  const c=await gemini(prompt);const st=await read(),id=crypto.randomUUID();st.creatives.unshift({id,createdAt:new Date().toISOString(),productId,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis});await write(st);s.json({...c,_creativeId:id});
+
+  const c=await gemini(prompt);
+  c.estilo_copy=estilo;
+  c.otimizar_vendas=!!optimizeSales;
+  c.intensidade=intensidade;
+  c.aberturas_abc=(c.hooks_alternativos||[]).slice(0,3).map((hook,i)=>({letra:['A','B','C'][i],hook}));
+  if(Array.isArray(c.takes))c.takes=c.takes.map(t=>({...t,fala:String(t.fala||'').replace(/^\s*\.{2,}\s*/,'').replace(/\s*\.{2,}\s*$/,'').trim()}));
+  const st=await read(),id=crypto.randomUUID();
+  st.creatives.unshift({id,createdAt:new Date().toISOString(),productId,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis});
+  await write(st);s.json({...c,_creativeId:id});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar.'})}});
 
 app.get('/api/products',auth,async(_,s)=>s.json((await read()).products.slice(0,100)));
