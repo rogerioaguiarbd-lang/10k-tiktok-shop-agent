@@ -51,6 +51,14 @@ app.post('/api/analyze',auth,upload.single('image'),async(r,s)=>{try{
   const st=await read(),id=crypto.randomUUID();st.products.unshift({id,createdAt:new Date().toISOString(),analysis:a});await write(st);s.json({...a,_productId:id});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha na análise.'})}});
 
+app.post('/api/product-prompt',auth,async(r,s)=>{try{
+  const {analysis}=r.body||{};
+  if(!analysis)return s.status(400).json({error:'Analise um produto primeiro.'});
+  const prompt=`Você é especialista em fotografia publicitária de produtos para TikTok Shop. Com base SOMENTE na análise abaixo, crie UM prompt de imagem em português do Brasil para gerar APENAS O PRODUTO, sem pessoas, sem avatar, sem mãos e sem partes do corpo. Preserve fielmente somente os atributos sustentados pela análise, como formato, cor, embalagem, acabamento, marca e detalhes visíveis. Não invente características, materiais, textos, logos, preço, desconto ou acessórios inexistentes. Composição vertical 9:16, produto como protagonista absoluto, aparência realista, iluminação profissional natural, fotografia de e-commerce premium e fundo/cenário coerente com a categoria. Não adicione texto gráfico à imagem, exceto textos que já façam parte da embalagem original. Responda SOMENTE JSON válido no formato {prompt_imagem_produto}. ANÁLISE: ${JSON.stringify(analysis)}`;
+  const out=await gemini(prompt);
+  s.json(out);
+}catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar prompt do produto.'})}});
+
 app.post('/api/generate',auth,async(r,s)=>{try{
   const {analysis,format,duration=15,generator='Genérico',avatar='Automático',environment='Automático',variation=1,productId=null}=r.body||{};
   if(!analysis||!['UGC','POV'].includes(format))return s.status(400).json({error:'Escolha UGC ou POV.'});
@@ -73,13 +81,11 @@ CONTINUIDADE VISUAL — REGRA RÍGIDA: mantenha o mesmo avatar fornecido pelo us
 
 CONTINUIDADE DE CÂMERA: mudanças de enquadramento são permitidas somente como movimentos ou cortes naturais dentro do mesmo ambiente, por exemplo aproximação, leve pan, mudança de plano ou detalhe do produto. Nunca faça uma transição que pareça mudar de locação. Descreva cada prompt_video de forma que reforce explicitamente a continuidade do take anterior.
 
-PROMPT EXTRA — IMAGEM APENAS DO PRODUTO: além dos 3 takes, gere o campo prompt_imagem_produto. Esse prompt deve servir para criar uma imagem publicitária realista mostrando SOMENTE o produto identificado no print, sem pessoas, sem avatar, sem mãos e sem partes do corpo. Preserve fielmente os atributos visuais do produto que estejam sustentados pela análise, como cor, formato, embalagem, acabamento e marca quando visível. Não invente características. Use composição vertical 9:16, produto como protagonista, enquadramento profissional para e-commerce/TikTok Shop, iluminação realista e fundo/cenário coerente com a categoria. O texto do prompt deve estar em português BR. Não inclua frases, preços ou textos gráficos na imagem, a menos que façam parte da embalagem original do produto.
-
 A soma das durações dos três takes deve ser ${duration}s. As falas devem caber naturalmente no tempo de cada take.
 
 Crie 1 hook principal e exatamente 3 hooks alternativos. Os hooks alternativos são opções apenas para substituir a abertura do Take 1; o corpo e CTA continuam pertencendo ao mesmo anúncio. Não invente fatos, benefícios, preço, desconto, urgência, avaliações, materiais, especificações ou resultados que não estejam sustentados pela análise.
 
-Responda SOMENTE JSON válido neste formato: {formato,duracao_total,gerador,avatar,ambiente,conceito,hook_escolhido,hooks_alternativos:[3],prompt_imagem_produto,takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video}]}. Variação ${variation}. ANÁLISE: ${JSON.stringify(analysis)}`;
+Responda SOMENTE JSON válido neste formato: {formato,duracao_total,gerador,avatar,ambiente,conceito,hook_escolhido,hooks_alternativos:[3],takes:[{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video},{take,titulo,duracao_segundos,objetivo,cena,acao,enquadramento,fala,texto_tela,prompt_video}]}. Variação ${variation}. ANÁLISE: ${JSON.stringify(analysis)}`;
   const c=await gemini(prompt);const st=await read(),id=crypto.randomUUID();st.creatives.unshift({id,createdAt:new Date().toISOString(),productId,productName:analysis.produto||'Produto',creative:c,analysisSnapshot:analysis});await write(st);s.json({...c,_creativeId:id});
 }catch(e){console.error(e);s.status(500).json({error:e.message||'Falha ao gerar.'})}});
 
