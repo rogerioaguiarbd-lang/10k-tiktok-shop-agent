@@ -1,0 +1,1 @@
+Trigger de deploy para sincronizar o Railway com o commit mais recente da branch main em 2026-09-05.
