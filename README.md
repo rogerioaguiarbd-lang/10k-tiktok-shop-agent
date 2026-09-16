@@ -11,4 +11,6 @@ Product Intelligence, Creative Router, Reference Lock, Motion Engine, anti-hallu
 ## Produção
 `node server.mjs` inicia `server-v6.mjs`.
 
+Rollback da versão anterior: `6a5f700155304d14a0aef9b04c3561b5c4e5ec7e`.
+
 Variáveis necessárias: `GEMINI_API_KEY`, `GEMINI_MODEL`, `ADMIN_PASSWORD`, `APP_SECRET`, `PORT`, `NODE_ENV`.
