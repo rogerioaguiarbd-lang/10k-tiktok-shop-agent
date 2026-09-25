@@ -1,0 +1,19 @@
+{
+  "name": "10K Prompt AI",
+  "short_name": "10K Prompt",
+  "description": "10K Prompt AI · Master System 8.0",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07090d",
+  "theme_color": "#07090d",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
